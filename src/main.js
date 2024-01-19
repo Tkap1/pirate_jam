@@ -1,5 +1,5 @@
 
-import { lerp, rgb_to_hex_str, rrr, rgb, range_lerp } from "./utils.js";
+import { lerp, rgb_to_hex_str, rrr, rgb, range_lerp, rect_collides_rect, v2_distance, v2_sub, v2_dot, v2_normalize } from "./utils.js";
 
 document.querySelector("#app").innerHTML = `<canvas id="canvas"></canvas>`;
 const canvas = document.querySelector("#canvas");
@@ -63,7 +63,6 @@ function frame(timestamp)
 		document.addEventListener("keydown", on_key_down);
 		document.addEventListener("keyup", on_key_up);
 		window.addEventListener("resize", on_window_resize);
-		// ctx.imageSmoothingEnabled = false;
 
 		const center = Math.floor(grid_size / 2);
 		for(let y = 0; y < grid_size; y += 1) {
@@ -150,12 +149,11 @@ function update()
 			let x = miner.x;
 			let y = miner.y;
 			const offsets = [{x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}, {x: 0, y: -1}];
-			x += offsets[miner.orientation].x;
-			y += offsets[miner.orientation].y;
+			const offset = offsets[miner.orientation];
+			x += offset.x;
+			y += offset.y;
 			if(get_item(v2(x, y))) { break; }
-			item.pos = v2(x, y);
-			item.belt_progress = 0;
-			item.draw_pos = v2(item.pos.x * tile_size, item.pos.y * tile_size);
+			item.pos = v2(x * tile_size + tile_size / 2 * offset.x, y * tile_size + tile_size / 2);
 			items.push(item);
 		}
 
@@ -163,35 +161,61 @@ function update()
 	}
 
 	// vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv		item update start		vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-	for(let items_i = 0; items_i < items.length; items_i += 1) {
-		const item = items[items_i];
-		const pos = center_rect(item.pos, v2(item_size), v2(tile_size));
-		const belt = get_belt(item.pos);
-
-		if(belt) {
-			const offsets = [{x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}, {x: 0, y: -1}];
-			const offset = offsets[belt.orientation];
-			item.belt_progress += delta * 0.3;
-			const next_item = get_item(v2(item.pos.x + offset.x, item.pos.y + offset.y));
-			if(next_item) {
-				item.belt_progress = Math.min(item.belt_progress, 0.6);
-			}
-
-			const belt_pos = v2(belt.x * tile_size, belt.y * tile_size);
-			const center = get_center(belt_pos, v2(tile_size));
-			item.draw_pos = v2(
-				center.x - tile_size / 2 * offset.x + (item.belt_progress + 0.5) * offset.x * tile_size,
-				center.y - tile_size / 2 * offset.y + (item.belt_progress + 0.5) * offset.y * tile_size
-			);
-
-			if(item.belt_progress > 1) {
-				item.belt_progress -= 1;
-				item.pos.x += offset.x;
-				item.pos.y += offset.y;
+	for(let item_i = 0; item_i < items.length; item_i += 1) {
+		const item = items[item_i];
+		const index = pos_to_index_floor(item.pos);
+		const curr_belt = get_belt(index);
+		if(!item.belt) {
+			item.belt = curr_belt;
+			if(curr_belt) {
+				const belt_pos = get_center(v2(curr_belt.x * tile_size, curr_belt.y * tile_size), v2(tile_size));
+				item.pos = belt_pos;
 			}
 		}
-		else {
-			item.draw_pos = v2(item.pos.x * tile_size + tile_size / 2, item.pos.y * tile_size + tile_size / 2);
+
+		if(item.belt) {
+			const item_topleft = to_center(item.pos, v2(item_size));
+			const belt_pos = v2(item.belt.x * tile_size, item.belt.y * tile_size);
+			if(!rect_collides_rect(item_topleft, v2(item_size), belt_pos, v2(tile_size))) {
+				if(curr_belt) {
+					const curr_belt_pos = get_center(v2(curr_belt.x * tile_size, curr_belt.y * tile_size), v2(tile_size));
+					const dist = v2_distance(curr_belt_pos, item.pos);
+					if(dist < 1) {
+						item.belt = curr_belt;
+						item.pos = curr_belt_pos;
+					}
+				}
+				else {
+					item.belt = null;
+				}
+			}
+		}
+
+		if(item.belt) {
+			const belt = item.belt;
+			const offsets = [{x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}, {x: 0, y: -1}];
+			const prev_pos = {...item.pos};
+			const offset = offsets[belt.orientation];
+			item.pos.x += offset.x * 16 * delta;
+			item.pos.y += offset.y * 16 * delta;
+
+			const check_size_v = v2(item_size * 1.0);
+
+			const item_topleft = to_center(item.pos, check_size_v);
+			for(let item_i2 = 0; item_i2 < items.length; item_i2 += 1) {
+				if(item_i == item_i2) { continue; }
+				const item2 = items[item_i2];
+				const item2_topleft = to_center(item2.pos, check_size_v);
+
+				const dot = v2_dot(v2_normalize(v2_sub(item2.pos, item.pos)), offset);
+				if(
+					(dot >= Math.cos(Math.PI * 0.0625) && dot <= 1) &&
+					rect_collides_rect(item_topleft, check_size_v, item2_topleft, check_size_v)
+				) {
+					item.pos = {...prev_pos};
+					break;
+				}
+			}
 		}
 	}
 	// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^		item update end		^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -203,7 +227,6 @@ function render()
 	ctx.reset();
 	ctx.clearRect(0, 0, canvas.width, canvas.height);
 	ctx.imageSmoothingEnabled = false;
-	// ctx.fillStyle = "#111111";
 	ctx.fillStyle = "#FFFFFF";
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -243,19 +266,14 @@ function render()
 	}
 
 	// vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv		render items start		vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-	for(let items_i = 0; items_i < items.length; items_i += 1) {
-		const item = items[items_i];
+	for(let item_i = 0; item_i < items.length; item_i += 1) {
+		const item = items[item_i];
 		ctx.fillStyle = "#0000ff";
-		// const pos = center_rect(item.draw_pos, v2(item_size), v2(tile_size));
-		// ctx.fillRect(pos.x, pos.y, item_size, item_size);
 
-		const pos = to_center(item.draw_pos, v2(item_size));
+		const pos = to_center(item.pos, v2(item_size));
 
 		ctx.fillRect(pos.x, pos.y, item_size, item_size);
 
-		// const p = get_center(pos, v2(item_size));
-		// ctx.fillStyle = "#00ff00";
-		// ctx.fillRect(p.x, p.y, 4, 4);
 	}
 	// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^		render items end		^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 }
@@ -297,7 +315,8 @@ function get_item(in_index)
 {
 	for(let item_i = 0; item_i < items.length; item_i += 1) {
 		const item = items[item_i];
-		if(item.pos.x === in_index.x && item.pos.y === in_index.y) {
+		const index = pos_to_index_floor(item.pos);
+		if(index.x === in_index.x && index.y === in_index.y) {
 			return item;
 		}
 	}

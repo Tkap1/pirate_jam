@@ -1,4 +1,9 @@
 
+export function rect_collides_rect(pos1, size1, pos2, size2)
+{
+	return pos1.x + size1.x > pos2.x && pos1.x < pos2.x + size2.x && pos1.y + size1.y > pos2.y && pos1.y < pos2.y + size2.y;
+}
+
 export function mouse_collides_rect(x, y, sx, sy)
 {
 	return mouse_x > x && mouse_x < x + sx &&
@@ -57,4 +62,41 @@ export function rgb(r, g, b)
 export function rrr(r)
 {
 	return {r: r, g: r, b: r}
+}
+
+export function v2_distance(a, b)
+{
+	let c = {};
+	c.x = a.x - b.x;
+	c.y = a.y - b.y;
+	return v2_length(c);
+}
+
+export function v2_length(a)
+{
+	return Math.sqrt(a.x * a.x + a.y * a.y);
+}
+
+export function v2_dot(a, b)
+{
+	return a.x * b.x + a.y * b.y;
+}
+
+export function v2_normalize(a)
+{
+	let c = {...a};
+	const len = v2_length(c);
+	if(len > 0) {
+		c.x /= len;
+		c.y /= len;
+	}
+	return c;
+}
+
+export function v2_sub(a, b)
+{
+	let c = {};
+	c.x = a.x - b.x;
+	c.y = a.y - b.y;
+	return c;
 }
